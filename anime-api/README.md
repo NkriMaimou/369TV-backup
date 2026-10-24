@@ -1,6 +1,6 @@
 # 369TV anime API
 
-A separate Node.js backend for the 369TV frontend, powered by [anime-sdk](https://github.com/hexxt-git/anime-sdk). It is kept separate from Cloudflare Pages because the SDK's built-in HTTP server uses Node's `http.Server`.
+A separate Node.js backend for the 369 NKRI TV frontend, powered by [anime-sdk](https://github.com/hexxt-git/anime-sdk). It runs separately from the frontend because the SDK's built-in HTTP server uses Node's `node:http.Server`.
 
 ## Requirements
 
@@ -17,7 +17,7 @@ cp .env.example .env
 npm run dev
 ```
 
-The API will listen on `http://localhost:8788` by default. Check `http://localhost:8788/health`.
+The API listens on `http://localhost:8788` by default. Check `http://localhost:8788/health`.
 
 Available SDK routes include:
 
@@ -32,15 +32,15 @@ Use the exact URN IDs returned by the API; the provider prefix is part of the ID
 
 ## Frontend connection
 
-Set `VITE_ANIME_API_URL=http://localhost:8788` in the frontend's local `.env`. The frontend helper lives at `../src/animeApi.js` only if you choose to move/copy it into your actual frontend source tree; this repository currently has no package.json or Vite entry configuration, so the new `AnimeHub.jsx` is supplied as a standalone integration component and is not wired into `App.jsx`.
+The frontend's Anime view is integrated through `AnimeHub.jsx` and is opened from the app menu using **Anime · Anime SDK**. Set `VITE_ANIME_API_URL=http://localhost:8788` in the frontend's local `.env`. For a deployed frontend, point it at the public URL of this Node service.
 
-For a deployed frontend, point `VITE_ANIME_API_URL` at the public URL of this Node service. Deploy `anime-api` to a Node-compatible host (for example, Render or Railway); do not deploy this server as a Cloudflare Pages Function.
+Deploy `anime-api` to a Node-compatible host (for example, Render or Railway); do not deploy this server as a Cloudflare Pages Function.
 
 ## Deployment environment
 
 Configure `NODE_ENV=production` and a strong random `PROXY_SECRET` on the backend host. The server refuses to start in production without the secret because the stream proxy must not be left as an unsigned public relay. Set `PORT` only if your host requires it.
 
-If you enable `API_TOKEN`, keep in mind that a secret embedded in a public browser app is not secret. Use it only for private/testing deployments or put authenticated access behind a server-side gateway.
+If you enable `API_TOKEN`, remember that a secret embedded in a public browser app is not secret. Use it only for private/testing deployments or put authenticated access behind a server-side gateway.
 
 ## Security and operational notes
 
