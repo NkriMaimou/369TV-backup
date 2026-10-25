@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { browseAnime, searchAnime } from "./animeApi.js";
 
+const PAGE_SIZE = 20;
 const SECTIONS = [
   { id: "trending", label: "Trending Now" },
   { id: "popular", label: "Popular Anime" },
@@ -51,35 +52,62 @@ function listOf(payload) {
   return payload?.results || payload?.items || payload?.media || payload?.data || [];
 }
 
+function itemKey(item) {
+  return String(item?.id ?? item?.mediaId ?? item?.malId ??
+    item?.title?.english ?? item?.title?.romaji ?? titleOf(item));
+}
+
+function mergeUnique(existing, incoming) {
+  const seen = new Set(existing.map(itemKey));
+  return [...existing, ...incoming.filter((item) => {
+    const key = itemKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  })];
+}
+
 export default function AnimeDiscovery({ provider, onChoose }) {
   const [catalogues, setCatalogues] = useState({});
   const [activeGenre, setActiveGenre] = useState("All");
   const [season, setSeason] = useState("FALL");
   const [seasonYear, setSeasonYear] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState({});
   const [opening, setOpening] = useState("");
   const [error, setError] = useState("");
+  const inFlightRef = useRef(new Set());
+  const exhaustedRef = useRef(new Set());
+  const pagesRef = useRef({});
 
   useEffect(() => {
     let cancelled = false;
+    inFlightRef.current.clear();
+    exhaustedRef.current.clear();
+    pagesRef.current = {};
+    setLoading(true);
+    setLoadingMore({});
+    setError("");
+    setCatalogues({});
 
     async function loadCatalogues() {
-      setLoading(true);
-      setError("");
-
-      const requests = await Promise.allSettled([
-        browseAnime("trending", { perPage: 20 }),
-        browseAnime("popular", { perPage: 20 }),
-        browseAnime("top", { perPage: 20 }),
-        browseAnime("seasonal", { perPage: 20, season, year: seasonYear }),
-      ]);
+      const requests = await Promise.allSettled(
+        SECTIONS.map((section) => browseAnime(section.id, {
+          perPage: PAGE_SIZE,
+          page: 1,
+          ...(section.id === "seasonal" ? { season, year: seasonYear } : {}),
+        }))
+      );
 
       if (cancelled) return;
 
       const next = {};
       requests.forEach((result, index) => {
         const key = SECTIONS[index].id;
-        next[key] = result.status === "fulfilled" ? listOf(result.value) : [];
+        const items = result.status === "fulfilled" ? listOf(result.value) : [];
+        next[key] = items;
+        pagesRef.current[key] = 1;
+        if (items.length < PAGE_SIZE) exhaustedRef.current.add(key);
         if (result.status === "rejected") {
           console.warn(`Anime catalogue "${key}" failed:`, result.reason);
         }
@@ -95,6 +123,35 @@ export default function AnimeDiscovery({ provider, onChoose }) {
     loadCatalogues();
     return () => { cancelled = true; };
   }, [season, seasonYear]);
+
+  const loadNextPage = useCallback(async (sectionId) => {
+    if (loading || inFlightRef.current.has(sectionId) || exhaustedRef.current.has(sectionId)) return;
+    inFlightRef.current.add(sectionId);
+    setLoadingMore((current) => ({ ...current, [sectionId]: true }));
+    const nextPage = (pagesRef.current[sectionId] || 1) + 1;
+    const section = SECTIONS.find((entry) => entry.id === sectionId);
+
+    try {
+      const payload = await browseAnime(sectionId, {
+        perPage: PAGE_SIZE,
+        page: nextPage,
+        ...(sectionId === "seasonal" ? { season, year: seasonYear } : {}),
+      });
+      const items = listOf(payload);
+      setCatalogues((current) => ({
+        ...current,
+        [sectionId]: mergeUnique(current[sectionId] || [], items),
+      }));
+      pagesRef.current[sectionId] = nextPage;
+      if (items.length < PAGE_SIZE) exhaustedRef.current.add(sectionId);
+    } catch (err) {
+      console.warn(`Could not load more anime for "${section?.label || sectionId}":`, err);
+      // Do not mark the shelf exhausted; a later scroll can retry the failed page.
+    } finally {
+      inFlightRef.current.delete(sectionId);
+      setLoadingMore((current) => ({ ...current, [sectionId]: false }));
+    }
+  }, [loading, season, seasonYear]);
 
   async function openAnime(item) {
     const title = titleOf(item);
@@ -195,7 +252,26 @@ export default function AnimeDiscovery({ provider, onChoose }) {
               <h3>{section.label}</h3>
               <span>{filtered.length ? `${filtered.length} titles` : loading ? "Loading…" : ""}</span>
             </div>
-            <div className="anime-discovery-track">
+            <div
+              className="anime-discovery-track"
+              onScroll={(event) => {
+                const track = event.currentTarget;
+                if (track.scrollWidth - track.clientWidth - track.scrollLeft < 360) {
+                  void loadNextPage(section.id);
+                }
+              }}
+              onWheel={(event) => {
+                const track = event.currentTarget;
+                if (Math.abs(event.deltaY) > Math.abs(event.deltaX) &&
+                    track.scrollWidth > track.clientWidth &&
+                    ((event.deltaY > 0 && track.scrollLeft + track.clientWidth < track.scrollWidth - 1) ||
+                     (event.deltaY < 0 && track.scrollLeft > 0))) {
+                  track.scrollLeft += event.deltaY;
+                  event.preventDefault();
+                }
+              }}
+              aria-label={`${section.label} anime; horizontally scroll for more`}
+            >
               {filtered.map((item, index) => {
                 const title = titleOf(item);
                 const poster = posterOf(item);
@@ -225,6 +301,13 @@ export default function AnimeDiscovery({ provider, onChoose }) {
                   </button>
                 );
               })}
+              {(loading || loadingMore[section.id]) && Array.from({ length: 5 }, (_, index) => (
+                <div className="anime-discovery-skeleton" key={`skeleton-${index}`} aria-hidden="true">
+                  <span className="anime-discovery-skeleton-poster" />
+                  <span className="anime-discovery-skeleton-line" />
+                  <span className="anime-discovery-skeleton-line short" />
+                </div>
+              ))}
             </div>
           </section>
         );
