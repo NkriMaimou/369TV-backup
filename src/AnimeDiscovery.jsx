@@ -79,9 +79,11 @@ export default function AnimeDiscovery({ provider, onChoose }) {
   const inFlightRef = useRef(new Set());
   const exhaustedRef = useRef(new Set());
   const pagesRef = useRef({});
+  const generationRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    const generation = ++generationRef.current;
     inFlightRef.current.clear();
     exhaustedRef.current.clear();
     pagesRef.current = {};
@@ -126,6 +128,7 @@ export default function AnimeDiscovery({ provider, onChoose }) {
 
   const loadNextPage = useCallback(async (sectionId) => {
     if (loading || inFlightRef.current.has(sectionId) || exhaustedRef.current.has(sectionId)) return;
+    const generation = generationRef.current;
     inFlightRef.current.add(sectionId);
     setLoadingMore((current) => ({ ...current, [sectionId]: true }));
     const nextPage = (pagesRef.current[sectionId] || 1) + 1;
@@ -137,6 +140,7 @@ export default function AnimeDiscovery({ provider, onChoose }) {
         page: nextPage,
         ...(sectionId === "seasonal" ? { season, year: seasonYear } : {}),
       });
+      if (generation !== generationRef.current) return;
       const items = listOf(payload);
       setCatalogues((current) => ({
         ...current,
@@ -148,8 +152,10 @@ export default function AnimeDiscovery({ provider, onChoose }) {
       console.warn(`Could not load more anime for "${section?.label || sectionId}":`, err);
       // Do not mark the shelf exhausted; a later scroll can retry the failed page.
     } finally {
-      inFlightRef.current.delete(sectionId);
-      setLoadingMore((current) => ({ ...current, [sectionId]: false }));
+      if (generation === generationRef.current) {
+        inFlightRef.current.delete(sectionId);
+        setLoadingMore((current) => ({ ...current, [sectionId]: false }));
+      }
     }
   }, [loading, season, seasonYear]);
 
