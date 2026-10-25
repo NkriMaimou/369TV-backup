@@ -83,7 +83,7 @@ export default function AnimeDiscovery({ provider, onChoose }) {
 
   useEffect(() => {
     let cancelled = false;
-    const generation = ++generationRef.current;
+    generationRef.current += 1;
     inFlightRef.current.clear();
     exhaustedRef.current.clear();
     pagesRef.current = {};
